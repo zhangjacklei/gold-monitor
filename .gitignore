@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# 运行期自动生成的状态文件（GitHub Actions 通过 cache 持久化，不入库）
+gold_alert_state.json

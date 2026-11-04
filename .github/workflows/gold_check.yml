@@ -1,0 +1,32 @@
+name: 金价阈值检查
+# 每 5 分钟检查一次，四大行最低价跌破 800/750/.../500 任一档即推送（边沿触发，不刷屏）
+# 注：GitHub Actions 定时为 UTC，且高峰可能延迟 15~60 分钟；对金价阈值足够用。
+# 免费说明：公开仓库免费不限量；私有仓库免费额度 2000 分钟/月，
+#   每5分钟检查约 8640 分钟/月会超额，私有仓库请把下方 cron 改为 '*/15 * * * *' 或 '*/30 * * * *'。
+on:
+  schedule:
+    - cron: '*/5 * * * *'        # 每5分钟（UTC）
+  workflow_dispatch:             # 允许手动触发测试
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 关键：GitHub Actions 每次都是全新 VM，gold_alert_state.json 默认不会跨运行保留，
+      # 会导致“跌破”事件每条都重复推送（刷屏）。用 cache 把状态文件持久化，边沿触发才真正生效。
+      - name: 恢复预警状态（持久化，避免跌破期间每条都刷屏）
+        uses: actions/cache@v4
+        with:
+          path: gold_alert_state.json
+          key: gold-alert-state-${{ github.run_id }}
+          restore-keys: |
+            gold-alert-state-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 运行阈值检查
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}   # 企业微信机器人 或 Server酱 https://sctapi.ftqq.com/<KEY>.send
+          GM_MONITOR: min                            # min=四大行最低价；sge=上金所基准
+        run: python3 gold_monitor.py --mode check

@@ -1,0 +1,22 @@
+name: 金价每日播报
+# 每天 10:00 与 20:00（北京时间）各推送一遍当前四大行金价 + 上金所基准
+# GitHub Actions 定时为 UTC，北京时间 = UTC+8：
+#   10:00 北京时间 = 02:00 UTC；20:00 北京时间 = 12:00 UTC
+on:
+  schedule:
+    - cron: '0 2 * * *'          # 10:00 北京时间
+    - cron: '0 12 * * *'         # 20:00 北京时间
+  workflow_dispatch:             # 允许手动触发测试
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 运行每日播报
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}   # 企业微信机器人 或 Server酱
+        run: python3 gold_monitor.py --mode report
