@@ -1,0 +1,15 @@
+name: 保活（防定时任务被停用）
+# GitHub 规则：公开仓库若 60 天内无任何 workflow run，会自动禁用所有 scheduled 工作流。
+# 本工作流每月运行一次，仅为保持仓库有 Actions 活动，从而保护 gold_check/gold_report 的定时任务。
+# （当前 gold_check 每 5 分钟运行，本身已防停用；此文件作为额外保险，无副作用。）
+on:
+  schedule:
+    - cron: '0 0 1 * *'          # 每月 1 日 00:00 UTC（北京时间 08:00）
+  workflow_dispatch:             # 允许手动触发
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping（保持仓库活跃）
+        run: echo "keepalive $(date -u +%Y-%m-%dT%H:%M:%SZ)"
