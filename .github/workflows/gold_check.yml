@@ -27,6 +27,8 @@ jobs:
           python-version: '3.11'
       - name: 运行阈值检查
         env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}   # 企业微信机器人 或 Server酱 https://sctapi.ftqq.com/<KEY>.send
+          BARK_KEY: ${{ secrets.BARK_KEY }}          # Bark 设备钥匙（iOS 推送，推荐）
+          BARK_SERVER: ${{ secrets.BARK_SERVER }}    # 可选：自建 Bark 服务地址
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}    # 可选：企业微信机器人 或 Server酱（改用它时填）
           GM_MONITOR: min                            # min=四大行最低价；sge=上金所基准
         run: python3 gold_monitor.py --mode check
