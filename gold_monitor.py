@@ -212,7 +212,8 @@ class BarkNotifier(Notifier):
     """iOS 推送，需先在 App Store 装 Bark 并复制钥匙。环境变量 BARK_KEY。"""
     def __init__(self):
         self.key = os.getenv("BARK_KEY")
-        self.server = os.getenv("BARK_SERVER", "https://api.day.app").rstrip("/")
+        # GitHub Actions 会把未配置的 Secret 注入为空字符串，需显式回退默认值
+        self.server = (os.getenv("BARK_SERVER") or "https://api.day.app").rstrip("/")
 
     def send(self, title, body):
         if not self.key:
