@@ -59,8 +59,14 @@ STATE_FILE = os.getenv("GM_STATE_FILE", os.path.join(os.path.dirname(os.path.abs
 FETCH_RETRIES = 3
 FETCH_RETRY_WAIT = 10
 
-# 跌破后价格回升到阈值之上时，是否也发一条“已回升”提醒
+# 跌破后价格回升到阈值之上时，是否也发一条"已回升"提醒
 RECOVER_NOTIFY = os.getenv("GM_RECOVER_NOTIFY", "0") in ("1", "true", "True")
+
+# 数据源连续抓取失败告警：连续失败达到 N 次才推一条，避免偶发抖动误报。
+# check 每 5 分钟一次，N=3 约 15 分钟即可发现停摆；只推一次不刷屏，恢复后再推一条。
+FETCH_FAIL_ALERT_N = int(os.getenv("GM_FAIL_ALERT_N", "3"))
+FAIL_COUNT_KEY = "__fetch_fail_count"   # state 中记录连续失败次数的键（避开数字档位键）
+FETCH_RECOVER_NOTIFY = os.getenv("GM_FAIL_RECOVER_NOTIFY", "1") in ("1", "true", "True")
 
 # 四行在页面 data-pa 中的属性名 -> 中文名
 BANK_FIELDS = {
@@ -140,6 +146,23 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+def record_fetch_result(state, ok):
+    """更新连续失败计数。返回 (连续失败次数, 是否应推告警, 是否应推恢复通知)。
+
+    - 成功：计数归零；若上一次已处于告警状态（计数曾达到阈值），返回恢复标志。
+    - 失败：计数 +1；恰好达到阈值时推一条告警，之后静默不刷屏。
+    """
+    prev = int(state.get(FAIL_COUNT_KEY, 0) or 0)
+    if ok:
+        should_recover = FETCH_RECOVER_NOTIFY and prev >= FETCH_FAIL_ALERT_N
+        state[FAIL_COUNT_KEY] = 0
+        return 0, False, should_recover
+    cnt = prev + 1
+    state[FAIL_COUNT_KEY] = cnt
+    should_alert = cnt == FETCH_FAIL_ALERT_N
+    return cnt, should_alert, False
+
+
 def check_thresholds(price, state):
     """边沿触发：返回 [(事件类型, 阈值), ...]。事件类型 'breach'=跌破, 'recover'=回升。"""
     events = []
@@ -175,6 +198,35 @@ def format_report(prices):
         lines.append("⚠️ 当前已跌破档位：" + "、".join(f"{t}" for t in breached) + " 元/克")
     else:
         lines.append("✅ 当前未跌破任何预警档位")
+    return title, "\n".join(lines)
+
+
+def format_fetch_alert(count, err):
+    title = "🚨 金价监控数据源异常"
+    lines = [
+        f"时间：{now_str()}（北京时间）",
+        "—" * 18,
+        f"数据源已连续 {count} 次抓取失败（阈值 {FETCH_FAIL_ALERT_N} 次）。",
+        f"金价播报与预警已中断，请尽快检查。",
+        "—" * 18,
+        f"数据源：{SOURCE_URL}",
+        f"错误：{str(err)[:120]}",
+        "—" * 18,
+        "常见原因：页面改版 / 解析规则失效 / 网络或反爬。",
+        "处理：换源设 GM_SOURCE_URL，或修 parse_prices 的 data-pa 规则。",
+        "本告警仅推一次不刷屏。" + ("恢复后会另发一条通知。" if FETCH_RECOVER_NOTIFY else ""),
+    ]
+    return title, "\n".join(lines)
+
+
+def format_fetch_recovered():
+    title = "✅ 金价监控已恢复"
+    lines = [
+        f"时间：{now_str()}（北京时间）",
+        "—" * 18,
+        "数据源抓取已恢复正常，播报与阈值预警继续工作。",
+        f"数据源：{SOURCE_URL}",
+    ]
     return title, "\n".join(lines)
 
 
@@ -308,14 +360,38 @@ def notify(notifiers, title, body):
 
 
 # ============================ 主流程 ============================
+def handle_fetch_failure(err, dry_run=False):
+    """抓取失败：累加计数，达阈值推告警；统一写回状态。"""
+    state = load_state()
+    count, should_alert, _ = record_fetch_result(state, ok=False)
+    if not dry_run:
+        save_state(state)
+    print(f"[抓取异常] {err}（连续失败 {count}/{FETCH_FAIL_ALERT_N} 次）", file=sys.stderr)
+    if should_alert:
+        title, body = format_fetch_alert(count, err)
+        if dry_run:
+            print(f"[dry-run] 将触发数据源告警：\n{body}\n")
+        else:
+            notify(build_notifiers(), title, body)
+
+
+def handle_fetch_success(state, dry_run=False):
+    """抓取成功：归零计数，必要时推恢复通知。返回更新后的 state。"""
+    _, _, should_recover = record_fetch_result(state, ok=True)
+    if not dry_run and should_recover:
+        notify(build_notifiers(), *format_fetch_recovered())
+    return state
+
+
 def run_check(dry_run=False):
     try:
         prices = get_prices()
     except Exception as e:  # noqa: BLE001
-        print(f"[抓取异常] {e}", file=sys.stderr)
+        handle_fetch_failure(e, dry_run)
         return
-    mp = monitor_price(prices)
     state = load_state()
+    state = handle_fetch_success(state, dry_run)
+    mp = monitor_price(prices)
     events = check_thresholds(mp, state) if mp is not None else []
     if not dry_run:
         save_state(state)
@@ -334,8 +410,12 @@ def run_report(dry_run=False):
     try:
         prices = get_prices()
     except Exception as e:  # noqa: BLE001
-        print(f"[抓取异常] {e}", file=sys.stderr)
+        handle_fetch_failure(e, dry_run)
         return
+    state = load_state()
+    handle_fetch_success(state, dry_run)
+    if not dry_run:
+        save_state(state)
     title, body = format_report(prices)
     if dry_run:
         print(f"[dry-run] 每日播报：\n{body}\n")
