@@ -12,6 +12,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 持久化 state：与阈值检查 workflow 共享同一份状态，使连续失败计数跨运行累积，
+      # 达到阈值时由脚本推一条数据源告警（只推一次，恢复后再推）。
+      - name: 恢复状态（预警档位 + 连续失败计数）
+        uses: actions/cache@v4
+        with:
+          path: gold_alert_state.json
+          key: gold-alert-state-${{ github.run_id }}
+          restore-keys: |
+            gold-alert-state-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
