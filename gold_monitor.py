@@ -3,7 +3,7 @@
 """
 四大行黄金价格监控 · 阈值预警 · 每日播报
 ============================================================
-数据源 : 日金价(rijinjia.com/gold/936.html) 静态页面
+数据源 : 日金价(rijinjia.com/goldbar) 投资金条页
          含 工商银行 / 建设银行 / 中国银行 / 农业银行 投资金条价 + 上金所基准(Au99.99)
 阈值   : 800 / 750 / 700 / 650 / 600 / 550 / 500 元/克
          （四大行最低价跌破任意一档即预警，边沿触发，不会每次轮询刷屏）
@@ -49,7 +49,7 @@ MONITOR = os.getenv("GM_MONITOR", "min")
 # 数据源 URL（四大行金条 + 上金所基准，静态渲染）
 SOURCE_URL = os.getenv(
     "GM_SOURCE_URL",
-    "https://www.rijinjia.com/gold/936.html",
+    "https://www.rijinjia.com/goldbar",
 )
 
 # 状态文件：记录各阈值当前是否已跌破，用于边沿触发（防刷屏）
